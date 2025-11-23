@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import ReactFlow, {
   Background,
   Controls,
@@ -18,6 +19,7 @@ import CodeRabbitNode from './nodes/CodeRabbitNode';
 import JiraNode from './nodes/JiraNode';
 import TestExecutionNode from './nodes/TestExecutionNode';
 import RewardComputationNode from './nodes/RewardComputationNode';
+import TrainingDataNode from './nodes/TrainingDataNode';
 import TrainingNode from './nodes/TrainingNode';
 import NodeDetailsPanel from './NodeDetailsPanel';
 import ProgressTimeline from './ProgressTimeline';
@@ -30,6 +32,7 @@ const nodeTypes = {
   'coderabbit-review': CodeRabbitNode,
   'test-execution': TestExecutionNode,
   'reward-computation': RewardComputationNode,
+  'training-data': TrainingDataNode,
   'training': TrainingNode,
   'jira-subtask': JiraNode
 };
@@ -38,41 +41,43 @@ const edgeTypes = {
   'connector': CustomConnectorEdge,
 };
 
-// Auto-layout function - Improved spacing and organization
-const getLayoutedElements = (nodes, edges, direction = 'TB') => {
-  const dagreGraph = new dagre.graphlib.Graph();
-  dagreGraph.setDefaultEdgeLabel(() => ({}));
-  // Better spacing: more horizontal space, consistent vertical spacing
-  dagreGraph.setGraph({ 
-    rankdir: direction, 
-    nodesep: 150,  // Increased horizontal spacing
-    ranksep: 200   // Increased vertical spacing for cleaner flow
+// Auto-layout function - Left to Right flow
+const getLayoutedElements = (nodes, edges, direction = 'LR') => {
+  // CRITICAL: Force simple horizontal layout - don't use dagre for now
+  // Sort nodes by stepNumber to maintain workflow order
+  const sortedNodes = [...nodes].sort((a, b) => {
+    if (a.data?.stepNumber && b.data?.stepNumber) {
+      return a.data.stepNumber - b.data.stepNumber;
+    }
+    // Fallback: maintain original order
+    return 0;
   });
-
-  nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 320, height: 180 }); // Slightly larger nodes
-  });
-
-  edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
-  });
-
-  dagre.layout(dagreGraph);
-
-  nodes.forEach((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    node.targetPosition = 'top';
-    node.sourcePosition = 'bottom';
+  
+  // Place nodes horizontally left to right
+  sortedNodes.forEach((node, index) => {
     node.position = {
-      x: nodeWithPosition.x - 160, // Centered
-      y: nodeWithPosition.y - 90
+      x: index * 400, // 400px horizontal spacing between nodes
+      y: 0 // All nodes on same horizontal line
+    };
+    node.targetPosition = 'left';
+    node.sourcePosition = 'right';
+    node.draggable = false;
+    // Store layout info
+    node.data = {
+      ...node.data,
+      _layoutLocked: true,
+      _layoutDirection: 'LR'
     };
   });
+  
+  console.log('[Layout] Applied FORCED horizontal layout (left-to-right):', 
+    sortedNodes.map(n => ({ id: n.id, x: n.position.x, step: n.data?.stepNumber }))
+  );
 
   // Preserve all edge properties with connector style
   const layoutedEdges = edges.map(edge => {
     // Get source node status for connector color
-    const sourceNode = nodes.find(n => n.id === edge.source);
+    const sourceNode = sortedNodes.find(n => n.id === edge.source);
     const sourceStatus = sourceNode?.data?.status || edge.data?.sourceStatus || 'pending';
     
     return {
@@ -92,7 +97,7 @@ const getLayoutedElements = (nodes, edges, direction = 'TB') => {
     };
   });
 
-  return { nodes, edges: layoutedEdges };
+  return { nodes: sortedNodes, edges: layoutedEdges };
 };
 
 // Inner component that has access to useReactFlow hook for keyboard controls and node navigation
@@ -193,6 +198,78 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState(null);
   const [socket, setSocket] = useState(null);
+  const [workflowInfo, setWorkflowInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load existing workflow nodes on mount
+  useEffect(() => {
+    const loadWorkflowNodes = async () => {
+      try {
+        const response = await axios.get(`/api/workflows/${workflowId}/nodes`);
+        if (response.data.nodes && response.data.nodes.length > 0) {
+          // Clear any existing positions to ensure layout is applied
+          const nodesWithoutPositions = response.data.nodes.map(node => ({
+            ...node,
+            position: { x: 0, y: 0 } // Temporary, will be set by layout
+          }));
+          
+          // Layout the nodes with LEFT TO RIGHT direction
+          const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+            nodesWithoutPositions,
+            response.data.edges || [],
+            'LR' // Explicitly set Left to Right
+          );
+          
+          // CRITICAL: Force horizontal layout - dagre sometimes ignores rankdir
+          // Sort nodes by their order in the workflow (by stepNumber or by creation order)
+          const sortedNodes = [...layoutedNodes].sort((a, b) => {
+            // Sort by stepNumber if available, otherwise by node order
+            if (a.data?.stepNumber && b.data?.stepNumber) {
+              return a.data.stepNumber - b.data.stepNumber;
+            }
+            // Fallback: maintain original order
+            return 0;
+          });
+          
+          // Force horizontal layout: place nodes left to right
+          sortedNodes.forEach((node, i) => {
+            node.position = {
+              x: i * 400, // 400px horizontal spacing
+              y: 0 // All nodes on same horizontal line
+            };
+            node.targetPosition = 'left';
+            node.sourcePosition = 'right';
+            node.draggable = false;
+            // Update in layoutedNodes array
+            const nodeIndex = layoutedNodes.findIndex(n => n.id === node.id);
+            if (nodeIndex !== -1) {
+              layoutedNodes[nodeIndex] = node;
+            }
+          });
+          
+          console.log('[WorkflowCanvas] Forced horizontal layout:', layoutedNodes.map(n => ({
+            id: n.id,
+            x: n.position.x,
+            y: n.position.y
+          })));
+          
+          setNodes(layoutedNodes);
+          setEdges(layoutedEdges);
+        }
+        if (response.data.workflow) {
+          setWorkflowInfo(response.data.workflow);
+        }
+      } catch (error) {
+        console.error('Failed to load workflow nodes:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (workflowId) {
+      loadWorkflowNodes();
+    }
+  }, [workflowId]);
 
   useEffect(() => {
     // Connect to WebSocket
@@ -207,14 +284,22 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
       setNodes((nds) => {
         const exists = nds.find(n => n.id === node.id);
         if (exists) return nds;
-        return [...nds, node];
+        // Ensure new node has correct layout settings
+        const newNode = {
+          ...node,
+          targetPosition: 'left',
+          sourcePosition: 'right',
+          draggable: false,
+          position: { x: 0, y: 0 } // Temporary, will be set by layout
+        };
+        return [...nds, newNode];
       });
 
       // Re-layout after adding node (use setTimeout to batch updates)
       setTimeout(() => {
         setNodes((nds) => {
           setEdges((eds) => {
-            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds);
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds, 'LR');
             setEdges(layoutedEdges);
             return layoutedNodes;
           });
@@ -226,11 +311,53 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
     // Listen for node updates
     newSocket.on('node-updated', ({ id, data }) => {
       setNodes((nds) => {
-        const updatedNodes = nds.map((node) =>
-          node.id === id
-            ? { ...node, data: { ...node.data, ...data } }
-            : node
-        );
+        const updatedNodes = nds.map((node) => {
+          if (node.id === id) {
+            // CRITICAL: Preserve ALL layout properties when updating data
+            // Never allow position to be reset or changed
+            return { 
+              ...node, 
+              data: { ...node.data, ...data },
+              // FORCE preserve position - never reset to {x:0, y:0}
+              position: node.position && (node.position.x !== 0 || node.position.y !== 0) 
+                ? node.position 
+                : { x: 0, y: 0 }, // Only use 0,0 if position is truly missing
+              // Force horizontal layout connection points
+              targetPosition: 'left',
+              sourcePosition: 'right',
+              draggable: false, // Keep locked
+              // Mark as layout-locked
+              data: {
+                ...node.data,
+                ...data,
+                _layoutLocked: true,
+                _layoutDirection: 'LR'
+              }
+            };
+          }
+          // Ensure all nodes maintain layout settings
+          return {
+            ...node,
+            targetPosition: node.targetPosition || 'left',
+            sourcePosition: node.sourcePosition || 'right',
+            draggable: false
+          };
+        });
+        
+        // Re-apply layout if positions are all zeros (indicates layout was lost)
+        const needsLayout = updatedNodes.every(n => n.position.x === 0 && n.position.y === 0);
+        if (needsLayout && updatedNodes.length > 0) {
+          setTimeout(() => {
+            setNodes((nds) => {
+              setEdges((eds) => {
+                const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds, 'LR');
+                setEdges(layoutedEdges);
+                return layoutedNodes;
+              });
+              return nds;
+            });
+          }, 50);
+        }
         
         // Update edges connected to this node to reflect status changes
         setEdges((eds) => {
@@ -261,9 +388,9 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
         const sourceNode = nds.find(n => n.id === edge.source);
         const sourceStatus = sourceNode?.data?.status || 'pending';
         
-        const styledEdge = {
-          ...edge,
-          id: edge.id || `edge-${edge.source}-${edge.target}`,
+      const styledEdge = {
+        ...edge,
+        id: edge.id || `edge-${edge.source}-${edge.target}`,
           type: 'connector', // Use custom connector edge
           animated: false,
           data: {
@@ -271,30 +398,30 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
             sourceStatus: sourceStatus,
             status: sourceStatus
           },
-          style: {
+        style: {
             strokeWidth: 2,
-            ...edge.style
-          },
+          ...edge.style
+        },
           markerEnd: undefined // No arrow for pipeline connectors
-        };
+      };
 
-        setEdges((eds) => {
-          const exists = eds.find(e => e.id === styledEdge.id);
-          if (exists) return eds;
-          return addEdge(styledEdge, eds);
-        });
+      setEdges((eds) => {
+        const exists = eds.find(e => e.id === styledEdge.id);
+        if (exists) return eds;
+        return addEdge(styledEdge, eds);
+      });
 
-        // Re-layout after adding edge (use setTimeout to batch updates)
-        setTimeout(() => {
-          setNodes((nds) => {
-            setEdges((eds) => {
-              const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds);
-              setEdges(layoutedEdges);
-              return layoutedNodes;
-            });
-            return nds;
+      // Re-layout after adding edge (use setTimeout to batch updates)
+      setTimeout(() => {
+        setNodes((nds) => {
+          setEdges((eds) => {
+            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds, 'LR');
+            setEdges(layoutedEdges);
+            return layoutedNodes;
           });
-        }, 100);
+          return nds;
+        });
+      }, 100);
         
         return nds;
       });
@@ -311,9 +438,43 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
     };
   }, [workflowId]);
 
-  // Note: Layout is handled in node-created and edge-created handlers
-  // This effect is kept for initial layout but should not run on every change
-  // to avoid infinite loops
+  // CRITICAL: Enforce left-to-right layout whenever nodes change
+  // This prevents the layout from reverting to top-to-bottom
+  useEffect(() => {
+    if (nodes.length === 0) return;
+    
+    // Check if layout is broken (all positions at 0,0 or arranged vertically)
+    const allAtZero = nodes.every(n => n.position.x === 0 && n.position.y === 0);
+    const isVertical = nodes.length > 1 && nodes.every((n, i) => {
+      if (i === 0) return true;
+      const prev = nodes[i - 1];
+      // If y is increasing more than x, it's vertical (WRONG)
+      return Math.abs(n.position.y - prev.position.y) > Math.abs(n.position.x - prev.position.x);
+    });
+    
+    // If layout is broken, re-apply it
+    if (allAtZero || isVertical) {
+      console.log('[WorkflowCanvas] Layout broken, re-applying left-to-right layout');
+      setNodes((nds) => {
+        setEdges((eds) => {
+          const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds, 'LR');
+          setEdges(layoutedEdges);
+          return layoutedNodes;
+        });
+        return nds;
+      });
+    } else {
+      // Even if not broken, ensure all nodes have correct connection points
+      setNodes((nds) => {
+        return nds.map(node => ({
+          ...node,
+          targetPosition: 'left',
+          sourcePosition: 'right',
+          draggable: false
+        }));
+      });
+    }
+  }, [nodes.length]); // Only check when node count changes, not on every render
 
   const onNodeClick = useCallback((event, node) => {
     setSelectedNode(node);
@@ -349,7 +510,13 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
               ← Back to Board
             </button>
             <h2 className="text-xl font-bold text-gray-900">
-              Workflow: {workflowId ? `${workflowId.substring(0, 8)}...` : 'Loading...'}
+              {workflowInfo?.jiraTicketKey ? (
+                `Workflow ${workflowInfo.jiraTicketKey.match(/-(\d+)$/)?.[1] || workflowInfo.jiraTicketKey}`
+              ) : workflowId ? (
+                `Workflow: ${workflowId.substring(0, 8)}...`
+              ) : (
+                'Loading...'
+              )}
             </h2>
           </div>
         </div>
@@ -358,17 +525,41 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
 
       {/* Main Canvas Area */}
       <div className="flex-1 flex relative">
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading workflow...</p>
+            </div>
+          </div>
+        ) : (
         <div className="flex-1 relative">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
-            onNodesChange={onNodesChange}
+            onNodesChange={(changes) => {
+              // CRITICAL: Block ALL position changes to prevent layout from breaking
+              const filteredChanges = changes.filter(change => {
+                // Block position changes completely
+                if (change.type === 'position') {
+                  return false;
+                }
+                // Block drag events that might change positions
+                if (change.type === 'select' && change.dragging === true) {
+                  return false;
+                }
+                return true;
+              });
+              if (filteredChanges.length > 0) {
+                onNodesChange(filteredChanges);
+              }
+            }}
             onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
-            fitView
+            fitView={false}
             attributionPosition="bottom-left"
             panOnDrag={[1, 2]} // Left and middle mouse button for panning
             panOnScroll={false}
@@ -376,6 +567,9 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
             zoomOnPinch={true}
             preventScrolling={false}
             selectionOnDrag={false} // Disable selection drag to allow panning
+            nodesDraggable={false} // CRITICAL: Disable node dragging completely
+            nodesConnectable={false} // Disable manual connections
+            elementsSelectable={true} // Allow selection for details panel
             defaultEdgeOptions={{
               type: 'connector',
               animated: false,
@@ -390,6 +584,7 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
             <KeyboardControls onNodeFocus={handleStepClick} />
           </ReactFlow>
         </div>
+        )}
 
         {selectedNode && (
           <NodeDetailsPanel

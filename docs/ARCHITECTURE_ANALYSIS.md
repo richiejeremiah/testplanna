@@ -7,15 +7,26 @@
 ## Current Workflow Order (IMPLEMENTED)
 
 ```
-1. Find GitHub PR/Repo
-2. Fetch GitHub Code Context (detects PR vs Repo)
-3. CodeRabbit Reviews PR (or returns "no PR" status) ⭐ FIRST
-4. Gemini Plans Tests (informed by CodeRabbit + organized by category if repo)
-5. MiniMax Generates Tests (using organized structure + CodeRabbit insights)
-6. Test Execution (simulated - analyzes and executes generated tests) ⭐ NEW
-7. Reward Computation (computes RL training signals) ⭐ NEW
+0. Find GitHub PR/Repo
+1. Fetch GitHub Code Context (detects PR vs Repo)
+2. CodeRabbit Reviews PR (or returns "no PR" status) ⭐ FIRST
+3. Gemini Plans Tests (informed by CodeRabbit + organized by category if repo)
+4. MiniMax Generates Tests (using organized structure + CodeRabbit insights)
+5. Test Execution (simulated - analyzes and executes generated tests) ⭐ NEW
+6. Reward Computation (computes RL training signals) ⭐ NEW
+7. Training (if conditions met - fine-tunes models) ⭐ NEW
 8. Create Jira Subtask (includes tests + CodeRabbit findings + reward data)
+9. Update Jira Status & Create Follow-up Tickets ⭐ NEW
 ```
+
+## Key Automation Features
+
+**This system automates the ENTIRE testing lifecycle:**
+- ✅ **Test Code Generation** (MiniMax generates actual executable tests)
+- ✅ **Test Execution** (runs and analyzes generated tests)
+- ✅ **Jira Status Updates** (automatically updates ticket status: In Progress → Done)
+- ✅ **Ticket Creation** (creates subtasks with test results, plus follow-up tickets for issues)
+- ✅ **Intelligent Testing** (uses CodeRabbit findings to create targeted tests)
 
 ## Complete Architecture Diagram
 
@@ -73,11 +84,22 @@
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  STEP 3: Gemini AI Planning (INFORMED BY CODERABBIT)            │
+│  STEP 3: Gemini AI Planning (INFORMED BY CODERABBIT) 🧠         │
 │  ────────────────────────────────────────────────────────────   │
 │  GeminiService:                                                 │
 │  ├─ planTestCoverage(jiraTicket, codeDiff, codeRabbitInsights, │
 │  │                   repoStructure, isPR)                      │
+│  ├─ Role: Strategic test planning and analysis                 │
+│  ├─ What it does:                                               │
+│  │  ├─ Analyzes code structure from GitHub PR diff             │
+│  │  ├─ Reviews CodeRabbit findings (critical issues inform     │
+│  │  │  test priorities)                                         │
+│  │  ├─ Creates test plan:                                       │
+│  │  │  ├─ Determines how many unit tests needed                │
+│  │  │  ├─ Determines how many integration tests needed         │
+│  │  │  ├─ Identifies edge cases to test                        │
+│  │  │  └─ Provides reasoning for test strategy                 │
+│  │  └─ Considers repository structure (frontend/backend/devops)│
 │  ├─ If PR + CodeRabbit:                                        │
 │  │  ├─ Includes CodeRabbit findings in prompt                  │
 │  │  ├─ Focuses on addressing CodeRabbit issues                 │
@@ -88,6 +110,8 @@
 │  │  ├─ Organizes test plan: Frontend/Backend/DevOps            │
 │  │  └─ Plans comprehensive repository tests                    │
 │  └─ Generates reasoning flow (structured decision tree)         │
+│                                                               │
+│  Model: gemini-2.5-flash (latest stable, auto-fallback)        │
 │                                                               │
 │  Output:                                                        │
 │  • testPlan: {unitTests, integrationTests, edgeCases}          │
@@ -102,11 +126,21 @@
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  STEP 4: MiniMax Test Generation (ORGANIZED BY CATEGORY)        │
+│  STEP 4: MiniMax Test Generation (ORGANIZED BY CATEGORY) ⚡     │
 │  ────────────────────────────────────────────────────────────   │
 │  MiniMaxService:                                                │
 │  ├─ generateTestCode(testPlan, codeDiff, language,              │
 │  │                  codeRabbitInsights, repoStructure, isPR)   │
+│  ├─ Role: Actual test code generation                           │
+│  ├─ What it does:                                               │
+│  │  ├─ Takes Gemini's test plan as input                        │
+│  │  ├─ Generates production-ready test code:                    │
+│  │  │  ├─ JavaScript/TypeScript                                │
+│  │  │  ├─ Jest framework                                         │
+│  │  │  ├─ Complete test suites with proper structure            │
+│  │  │  └─ Includes assertions, error handling                   │
+│  │  ├─ Addresses critical issues from CodeRabbit in test design│
+│  │  └─ Generates executable code (not just descriptions)         │
 │  ├─ If PR:                                                      │
 │  │  ├─ Uses test plan from Gemini                              │
 │  │  ├─ Addresses CodeRabbit findings                            │
@@ -121,11 +155,13 @@
 │  │  └─ Creates comprehensive test suite                        │
 │  └─ Returns production-ready test code                         │
 │                                                               │
+│  Model: abab6.5s-chat                                          │
+│                                                               │
 │  Output:                                                        │
-│  • generatedCode: (test code)                                  │
+│  • generatedCode: (complete test code, ready to execute)      │
 │  • language: 'javascript' | 'python' | ...                     │
 │  • framework: 'Jest' | 'pytest' | ...                          │
-│  • testCount: (number)                                         │
+│  • testCount: (number, parsed from code)                       │
 │  • linesOfCode: (number)                                       │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -195,12 +231,28 @@
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  STEP 7: Create Jira Subtask                                    │
+│  STEP 7: Training (if conditions met) 🎓                         │
+│  ────────────────────────────────────────────────────────────   │
+│  TrainingService:                                                │
+│  ├─ checkAndTriggerTraining(workflow)                          │
+│  ├─ Checks if minimum examples collected (default: 10)          │
+│  ├─ Uses 70/20/10 training mixture (high/medium/low quality)     │
+│  ├─ Fine-tunes models for better test generation                │
+│  └─ Only triggers if enough high-quality examples                │
+│                                                               │
+│  Output:                                                        │
+│  • Model improvements for future workflows                      │
+│  • Training status and metrics                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  STEP 8: Create Jira Subtask 📋                                  │
 │  ────────────────────────────────────────────────────────────   │
 │  JiraService:                                                   │
 │  ├─ createTestSubtask(parentKey, testData)                     │
 │  ├─ Includes:                                                   │
-│  │  ├─ Generated test code                                     │
+│  │  ├─ Generated test code (full code, not just summary)        │
 │  │  ├─ Test coverage percentage                                │
 │  │  ├─ CodeRabbit findings                                     │
 │  │  ├─ AI reasoning                                            │
@@ -213,6 +265,32 @@
 │  • issueKey: 'TEST-XXX'                                         │
 │  • issueUrl: (Jira URL)                                        │
 │  • parentKey: (parent ticket)                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  STEP 9: Update Jira Status & Create Follow-up Tickets 🔄        │
+│  ────────────────────────────────────────────────────────────   │
+│  JiraService + WorkflowOrchestrator:                            │
+│  ├─ updateTicketStatus(issueKey, 'Done')                        │
+│  │  └─ Updates parent ticket to "Done" when workflow completes │
+│  │  └─ Also updates to "In Progress" when workflow starts      │
+│  │  └─ Uses Jira API transitions                               │
+│  ├─ createNewTicket() for Critical Issues (IF found):           │
+│  │  ├─ Creates NEW ticket (Bug, Highest priority)               │
+│  │  ├─ Includes all critical issues from CodeRabbit             │
+│  │  ├─ Links to original PR and workflow                       │
+│  │  └─ Labels: ['automated', 'code-review', 'critical']         │
+│  └─ createNewTicket() for Test Failures (IF tests failed):     │
+│     ├─ Creates NEW ticket (Bug, High priority)                 │
+│     ├─ Includes: failed test count, pass rate, coverage        │
+│     ├─ Links to PR and workflow                                │
+│     └─ Labels: ['automated', 'test-failure']                   │
+│                                                               │
+│  Output:                                                        │
+│  • Parent ticket status updated                                │
+│  • Critical issue tickets created (if applicable)               │
+│  • Test failure tickets created (if applicable)                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -365,12 +443,32 @@
 - **Training Format**: Formats workflow data for RL training
 - **Quality Flagging**: Marks high-quality examples (reward > 0.75)
 
+### JiraService ⭐ ENHANCED
+- **Status Updates**: Automatically updates Jira ticket status
+  - Updates to "In Progress" when workflow starts
+  - Updates to "Done" when workflow completes
+  - Uses Jira API transitions for proper state management
+- **Subtask Creation**: Creates subtask with test results
+  - Includes full generated test code
+  - Test coverage percentage
+  - Test execution results (pass/fail counts)
+  - CodeRabbit findings
+  - AI reasoning
+  - Reward signals
+- **Follow-up Ticket Creation**: Creates tickets based on findings
+  - Critical issue tickets (if CodeRabbit finds critical issues)
+  - Test failure tickets (if tests fail)
+  - All tickets linked to original PR and workflow
+- **Project Validation**: Validates project access before operations
+- **Mock Mode**: Supports development with mock data
+
 ### WorkflowOrchestrator
 - **Step Coordination**: Manages sequential workflow execution
 - **Data Passing**: Ensures all services receive correct context
 - **Edge Creation**: Creates visual flow connections
 - **Status Management**: Tracks workflow progress
 - **RL Integration**: Orchestrates reward computation and storage
+- **Jira Automation**: Orchestrates status updates and ticket creation
 - **IMPROVED: Flakiness Tracking**:
   - Hashes test code to identify same tests
   - Finds previous runs of same test
@@ -667,6 +765,7 @@ Jira Subtask
 13. **Anti-Gaming**: Immutable audit logs prevent manipulation ⭐ NEW
 14. **Full Transparency**: Diagnostic vectors show why rewards are high/low ⭐ NEW
 15. **Better Training**: Mixture strategy prevents distribution shift ⭐ NEW
+16. **Complete Jira Automation**: Status updates and intelligent ticket creation ⭐ NEW
 
 ## LLMOps Pipeline Features
 
@@ -692,6 +791,29 @@ Jira Subtask
 - ✅ Model version comparison
 - ✅ Improvement percentage calculation
 - ✅ Pipeline status monitoring
+
+### Jira Automation ⭐ NEW
+- ✅ **Status Updates**: Automatically updates ticket status
+  - Updates to "In Progress" when workflow starts
+  - Updates to "Done" when workflow completes successfully
+  - Uses Jira API transitions for proper state management
+- ✅ **Subtask Creation**: Always creates subtask with test results
+  - Full generated test code
+  - Test coverage percentage
+  - Test execution results (pass/fail counts)
+  - CodeRabbit findings
+  - AI reasoning
+  - Reward signals
+- ✅ **Follow-up Ticket Creation**: Creates tickets based on findings
+  - Critical issue tickets (if CodeRabbit finds critical issues)
+    - Bug type, Highest priority
+    - Includes all critical issues
+    - Labels: ['automated', 'code-review', 'critical']
+  - Test failure tickets (if tests fail)
+    - Bug type, High priority
+    - Includes failed test count, pass rate, coverage
+    - Labels: ['automated', 'test-failure']
+- ✅ **Ticket Linking**: All tickets linked to original PR and workflow
 - ✅ **IMPROVED**: Training mixture breakdown (high/medium/low)
 
 ### Anti-Gaming & Security ⭐ NEW
@@ -732,6 +854,7 @@ Jira Subtask
 - **Immutable Audit Logs**: Write-once logs with integrity verification
 - **Training Mixture Strategy**: 70/20/10 tracking (high/medium/low quality)
 - **Anti-Gaming Measures**: Audit logs, diagnostic vectors, flakiness penalties
+- **Jira Automation**: Automatic status updates and intelligent follow-up ticket creation
 
 ## Next Steps
 

@@ -347,10 +347,19 @@ export class WorkflowOrchestrator {
   async runAIGenerationStep(workflow, logger) {
     logger.step('STEP 4: AI Code Generation with MiniMax (addressing CodeRabbit findings)');
     
-    // Create AI Generation node (already created in planning step, just update)
-    await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'ai-review', {
+    // Create separate AI Generation node
+    await this.broadcaster.broadcastNodeCreated(workflow.workflowId, {
+      type: 'ai-review',
+      label: 'AI Review',
       status: 'generating',
-      phase: 'code-generation'
+      phase: 'code-generation',
+      stepNumber: 4
+    });
+    
+    // Create edge from planning to generation
+    await this.broadcaster.broadcastEdgeCreated(workflow.workflowId, 'ai-review', 'ai-generation', {
+      type: 'connector',
+      data: { sourceStatus: 'complete' }
     });
 
     await workflow.updateAIGenerationStatus('generating');
@@ -411,13 +420,20 @@ export class WorkflowOrchestrator {
     logger.success('Test code generated successfully');
 
     // Update UI - Send full generated code so frontend can parse individual tests
-    await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'ai-review', {
+    await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'ai-generation', {
       status: 'complete',
       testCount: generatedTests.testCount,
       language: generatedTests.language,
       framework: generatedTests.framework,
       linesOfCode: generatedTests.linesOfCode,
-      generatedCode: generatedTests.code // Send FULL code, not preview
+      generatedCode: generatedTests.code, // Send FULL code, not preview
+      // Include code context for showing what's being tested
+      github: {
+        prUrl: workflow.github?.prUrl,
+        filesChanged: workflow.github?.files?.length || 0,
+        branch: workflow.github?.branch
+      },
+      codeDiff: workflow.github?.diff ? workflow.github.diff.substring(0, 1000) : null // Preview of code being tested
     });
   }
 
@@ -1107,6 +1123,28 @@ export class WorkflowOrchestrator {
       workflow.workflowId,
       'test-execution',
       'reward-computation'
+    );
+
+    // Create Training Data node after storing training data
+    await this.broadcaster.broadcastNodeCreated(workflow.workflowId, {
+      type: 'training-data',
+      label: 'Store Training Data',
+      status: 'complete',
+      trainingData: workflow.rlTraining.trainingData,
+      reward: combinedReward,
+      combinedReward: combinedReward,
+      highQuality: combinedReward > 0.75
+    });
+
+    // Create edge from Reward Computation to Training Data
+    await this.broadcaster.broadcastEdgeCreated(
+      workflow.workflowId,
+      'reward-computation',
+      'training-data',
+      {
+        type: 'connector',
+        data: { sourceStatus: 'complete' }
+      }
     );
   }
 
