@@ -1,0 +1,40 @@
+# Copy this to backend/.env file
+
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/testflow
+
+# Server
+API_PORT=3000
+NODE_ENV=development
+
+# GitHub API
+GITHUB_TOKEN=ghp_your_github_token_here
+
+# AI Services
+GEMINI_API_KEY=AIzaSyBYYqtEbd_9HJD3ffATwmxEvGdzBHVoSmo
+MINIMAX_API_KEY=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJKZXJlbWlhaCBSaWNoYXJkIiwiVXNlck5hbWUiOiJEb2N0b3IgTGl0dGxlIiwiQWNjb3VudCI6IiIsIlN1YmplY3RJRCI6IjE5OTIyODA0MzcxOTk3Mzc1MTAiLCJQaG9uZSI6IiIsIkdyb3VwSUQiOiIxOTkyMjgwNDM3MTkxMzUyOTk4IiwiUGFnZU5hbWUiOiIiLCJNYWlsIjoiZHJsaXR0bGVraWRzQGdtYWlsLmNvbSIsIkNyZWF0ZVRpbWUiOiIyMDI1LTExLTIzIDAyOjMxOjM1IiwiVG9rZW5UeXBlIjoxLCJpc3MiOiJtaW5pbWF4In0.kbcMvuDSQLhOxmblWVvw7vF-VOur8QdbLrDB91_ApKEC0Ze3-adQ_P8aZTFfg94dNHUrCoZk3DKmk3tC8onFz6VklVyTTmAlP8ztb_q4gSX_XDnkGPp4Pcopn2ozad8LjNN1ibqLy6dDOOoiANu385Bxlt2CwGA0Aza59a_x1C42KhoTdpcalj-i1Foi7L3PR4ZAk4engw_ffiIfaU-ay95_6zlFp5PSReVa1-PRTX3CcRK5ujERWUkhvCGgU3jof_hJEz_94ZOVdLYxAEJFR9BHLpHbS7Bw2U0H9ZvZHvktay9SQNDP9ekKgIisYiZBZBu6vc02IIg2aUpi_pKPYQ
+
+# CodeRabbit (optional)
+CODERABBIT_API_KEY=
+CODERABBIT_WEBHOOK_SECRET=
+
+# Jira API - ✅ All configured!
+JIRA_BASE_URL=https://drlittlekids.atlassian.net
+JIRA_EMAIL=drlittlekids@gmail.com
+JIRA_API_TOKEN=ATCTT3xFfGNOZSauj3bWqntgmQ00okab9946KUt2XT1foJ6Co0UOtfdPLoh3
+
+# Jira Project Configuration
+# Default project key for creating standalone issues when parent ticket doesn't exist
+# Example: "TEST", "DEMO", "PROJ"
+JIRA_PROJECT_KEY=TEST
+
+# Jira Mock Mode (for development/demo only)
+# Set to "true" to use mock data when Jira API fails (creates fake tickets)
+# Set to "false" to return real errors (recommended for production)
+JIRA_USE_MOCK=false
+
+# Jira Webhook Security (Optional)
+# Get this from Jira webhook settings when creating webhook
+# If not set, webhook signature verification is disabled (for development)
+JIRA_WEBHOOK_SECRET=your_webhook_secret_here
+
