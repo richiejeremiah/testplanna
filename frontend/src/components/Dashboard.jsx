@@ -172,7 +172,7 @@ export default function Dashboard({ onStartWorkflow }) {
                   </>
                 ) : (
                   <>
-                    🚀 Start Demo
+                🚀 Start Demo
                   </>
                 )}
               </button>
@@ -198,11 +198,11 @@ export default function Dashboard({ onStartWorkflow }) {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
+              <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Jira Ticket Key
                     <span className="text-gray-400 text-xs font-normal ml-1">(optional - will be auto-created if not provided)</span>
-                  </label>
+                </label>
                 {jiraCredentials && selectedTicket ? (
                   <div className="relative">
                     <input
@@ -256,10 +256,10 @@ export default function Dashboard({ onStartWorkflow }) {
                 )}
               </div>
 
-                <div>
+              <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Assignee
-                  </label>
+                  Assignee
+                </label>
                 <input
                   type="text"
                   name="assignee"
@@ -270,10 +270,10 @@ export default function Dashboard({ onStartWorkflow }) {
                 />
               </div>
 
-                <div>
+              <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    PR URL or Repository <span className="text-red-500">*</span>
-                  </label>
+                  PR URL or Repository <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="url"
                   name="prUrl"
@@ -288,11 +288,11 @@ export default function Dashboard({ onStartWorkflow }) {
                 </p>
               </div>
 
-                <div>
+              <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     PR Number
                     <span className="text-gray-400 text-xs font-normal ml-1">(optional)</span>
-                  </label>
+                </label>
                 <input
                   type="number"
                   name="prNumber"
@@ -304,10 +304,10 @@ export default function Dashboard({ onStartWorkflow }) {
                 <p className="text-xs text-gray-500 mt-1">Will be extracted from PR URL if not provided</p>
               </div>
 
-                <div>
+              <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Branch
-                  </label>
+                  Branch
+                </label>
                 <input
                   type="text"
                   name="branch"
@@ -318,10 +318,10 @@ export default function Dashboard({ onStartWorkflow }) {
                 />
               </div>
 
-                <div>
+              <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Summary
-                  </label>
+                  Summary
+                </label>
                 <input
                   type="text"
                   name="summary"
@@ -334,11 +334,11 @@ export default function Dashboard({ onStartWorkflow }) {
             </div>
 
               <div className="md:col-span-2 pt-4 border-t border-gray-200">
-                <button
-                  type="submit"
-                  disabled={loading}
+            <button
+              type="submit"
+              disabled={loading}
                   className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center justify-center gap-2"
-                >
+            >
                   {loading ? (
                     <>
                       <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -349,9 +349,9 @@ export default function Dashboard({ onStartWorkflow }) {
                       🚀 Start Test Generation Workflow
                     </>
                   )}
-                </button>
+            </button>
               </div>
-            </form>
+          </form>
           </div>
         </div>
 
@@ -363,54 +363,54 @@ export default function Dashboard({ onStartWorkflow }) {
           </div>
           <div className="p-6">
             <div className="grid grid-cols-5 gap-6">
-              <div className="text-center">
+            <div className="text-center">
                 <div className="bg-blue-100 rounded-lg w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-sm">
-                  <span className="text-2xl">📦</span>
-                </div>
+                <span className="text-2xl">📦</span>
+              </div>
                 <h3 className="font-semibold text-gray-900 mb-1 text-sm">1. GitHub Push</h3>
                 <p className="text-xs text-gray-600">Code changes detected</p>
-              </div>
-              <div className="text-center">
+            </div>
+            <div className="text-center">
                 <div className="bg-purple-100 rounded-lg w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-sm">
-                  <span className="text-2xl">🤖</span>
-                </div>
+                <span className="text-2xl">🤖</span>
+              </div>
                 <h3 className="font-semibold text-gray-900 mb-1 text-sm">2. AI Review</h3>
                 <p className="text-xs text-gray-600">Gemini + MiniMax analyze & generate tests</p>
-              </div>
-              <div className="text-center">
+            </div>
+            <div className="text-center">
                 <div className="bg-orange-100 rounded-lg w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-sm">
-                  <span className="text-2xl">🔍</span>
-                </div>
+                <span className="text-2xl">🔍</span>
+              </div>
                 <h3 className="font-semibold text-gray-900 mb-1 text-sm">3. CodeRabbit</h3>
                 <p className="text-xs text-gray-600">Quality review & validation</p>
-              </div>
-              <div 
-                className="text-center cursor-pointer hover:opacity-80 transition-opacity"
-                onClick={() => setShowJiraModal(true)}
-              >
+            </div>
+            <div 
+              className="text-center cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => setShowJiraModal(true)}
+            >
                 <div className={`rounded-lg w-16 h-16 flex items-center justify-center mx-auto mb-3 relative shadow-sm ${
-                  jiraCredentials ? 'bg-green-100' : 'bg-gray-100'
-                }`}>
-                  <span className="text-2xl">📋</span>
-                  {jiraCredentials && (
-                    <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
-                      <span className="text-white text-xs">✓</span>
-                    </div>
-                  )}
-                </div>
-                <h3 className="font-semibold text-gray-900 mb-1 text-sm">4. Jira {jiraCredentials && <span className="text-green-600">✓</span>}</h3>
-                <p className="text-xs text-gray-600">
-                  {jiraCredentials ? 'Connected' : 'Click to connect'}
-                </p>
-                {jiraCredentials && selectedTicket && (
-                  <p className="text-xs text-green-600 mt-1 font-medium">
-                    {selectedTicket.key}
-                  </p>
+                jiraCredentials ? 'bg-green-100' : 'bg-gray-100'
+              }`}>
+                <span className="text-2xl">📋</span>
+                {jiraCredentials && (
+                  <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
+                    <span className="text-white text-xs">✓</span>
+                  </div>
                 )}
               </div>
-              <div className="text-center">
+                <h3 className="font-semibold text-gray-900 mb-1 text-sm">4. Jira {jiraCredentials && <span className="text-green-600">✓</span>}</h3>
+                <p className="text-xs text-gray-600">
+                {jiraCredentials ? 'Connected' : 'Click to connect'}
+              </p>
+              {jiraCredentials && selectedTicket && (
+                <p className="text-xs text-green-600 mt-1 font-medium">
+                  {selectedTicket.key}
+                </p>
+              )}
+            </div>
+            <div className="text-center">
                 <div className="bg-green-100 rounded-lg w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-sm">
-                  <span className="text-2xl">📋</span>
+                <span className="text-2xl">📋</span>
                 </div>
                 <h3 className="font-semibold text-gray-900 mb-1 text-sm">5. Jira Push</h3>
                 <p className="text-xs text-gray-600">Tests pushed to Jira subtask</p>

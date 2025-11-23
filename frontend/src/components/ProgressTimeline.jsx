@@ -195,7 +195,7 @@ export default function ProgressTimeline({ nodes = [], onStepClick }) {
               {/* Connecting Line - Horizontal line between steps */}
               {i < steps.length - 1 && (
                 <div className="flex items-center flex-1 mx-2 relative" style={{ height: '2px' }}>
-                  <div
+                <div
                     className="flex-1 transition-all duration-300"
                     style={{
                       height: '2px',

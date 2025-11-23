@@ -121,6 +121,273 @@ router.post('/demo/create', async (req, res) => {
 });
 
 /**
+ * GET /api/workflows/:workflowId/nodes - Get workflow nodes and edges for ReactFlow
+ */
+router.get('/:workflowId/nodes', async (req, res) => {
+  try {
+    const workflow = await Workflow.findOne({ workflowId: req.params.workflowId });
+    if (!workflow) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+
+    // Convert workflow data to ReactFlow nodes and edges
+    const nodes = [];
+    const edges = [];
+    let stepNumber = 1;
+
+    // GitHub Push Node
+    if (workflow.github?.prUrl) {
+      nodes.push({
+        id: 'github-push',
+        type: 'github-push',
+        data: {
+          status: workflow.github.prUrl ? 'complete' : 'pending',
+          prUrl: workflow.github.prUrl,
+          prNumber: workflow.github.prNumber,
+          branch: workflow.github.branch,
+          filesChanged: workflow.github.files?.length || 0,
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+    }
+
+    // CodeRabbit Review Node
+    if (workflow.codeRabbitReview) {
+      nodes.push({
+        id: 'coderabbit-review',
+        type: 'coderabbit-review',
+        data: {
+          status: workflow.codeRabbitReview.status === 'complete' ? 'complete' : 
+                  workflow.codeRabbitReview.status === 'reviewing' ? 'reviewing' : 'pending',
+          issues: workflow.codeRabbitReview.issues || {},
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        edges.push({
+          id: 'edge-github-push-coderabbit-review',
+          source: 'github-push',
+          target: 'coderabbit-review',
+          type: 'connector',
+          data: { sourceStatus: nodes[nodes.length - 2].data.status }
+        });
+      }
+    }
+
+    // AI Planning Node
+    if (workflow.aiPlanning) {
+      nodes.push({
+        id: 'ai-review',
+        type: 'ai-review',
+        data: {
+          status: workflow.aiPlanning.status === 'complete' ? 'complete' : 
+                  workflow.aiPlanning.status === 'analyzing' ? 'analyzing' : 'pending',
+          plan: workflow.aiPlanning.plan,
+          reasoning: workflow.aiPlanning.reasoning,
+          reasoningFlow: workflow.aiPlanning.reasoningFlow, // Include reasoning flow for detailed breakdown
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        const prevNode = nodes[nodes.length - 2];
+        edges.push({
+          id: `edge-${prevNode.id}-ai-review`,
+          source: prevNode.id,
+          target: 'ai-review',
+          type: 'connector',
+          data: { sourceStatus: prevNode.data.status }
+        });
+      }
+    }
+
+    // AI Generation Node (separate from planning)
+    if (workflow.aiGeneration) {
+      // Debug: Log generatedCode availability
+      const hasGeneratedCode = !!workflow.aiGeneration.generatedCode;
+      const generatedCodeLength = workflow.aiGeneration.generatedCode?.length || 0;
+      if (workflow.aiGeneration.status === 'complete') {
+        console.log(`[Workflow ${workflow.workflowId}] AI Generation node:`, {
+          hasGeneratedCode,
+          generatedCodeLength,
+          testCount: workflow.aiGeneration.testCount,
+          language: workflow.aiGeneration.language
+        });
+      }
+      
+      nodes.push({
+        id: 'ai-generation',
+        type: 'ai-review', // Use same node type for now
+        data: {
+          status: workflow.aiGeneration.status === 'complete' ? 'complete' : 
+                  workflow.aiGeneration.status === 'generating' ? 'generating' : 'pending',
+          testCount: workflow.aiGeneration.testCount,
+          language: workflow.aiGeneration.language,
+          framework: workflow.aiGeneration.framework,
+          linesOfCode: workflow.aiGeneration.linesOfCode,
+          generatedCode: workflow.aiGeneration.generatedCode || null, // Include generated code for parsing (explicit null if missing)
+          // Fallback: Include plan data from planning step if generatedCode is missing
+          plan: (!workflow.aiGeneration.generatedCode && workflow.aiPlanning?.plan) ? workflow.aiPlanning.plan : null,
+          // Include code context for showing what's being tested
+          github: workflow.github ? {
+            prUrl: workflow.github.prUrl,
+            filesChanged: workflow.github.files?.length || 0,
+            branch: workflow.github.branch
+          } : null,
+          codeDiff: workflow.github?.diff ? workflow.github.diff.substring(0, 1000) : null, // Preview of code being tested
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        const prevNode = nodes[nodes.length - 2];
+        edges.push({
+          id: `edge-${prevNode.id}-ai-generation`,
+          source: prevNode.id,
+          target: 'ai-generation',
+          type: 'connector',
+          data: { sourceStatus: prevNode.data.status }
+        });
+      }
+    }
+
+    // Test Execution Node
+    if (workflow.testExecution) {
+      nodes.push({
+        id: 'test-execution',
+        type: 'test-execution',
+        data: {
+          status: workflow.testExecution.status || 'pending',
+          results: workflow.testExecution.results,
+          coverage: workflow.testExecution.coverage,
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        const prevNode = nodes[nodes.length - 2];
+        edges.push({
+          id: `edge-${prevNode.id}-test-execution`,
+          source: prevNode.id,
+          target: 'test-execution',
+          type: 'connector',
+          data: { sourceStatus: prevNode.data.status }
+        });
+      }
+    }
+
+    // Reward Computation Node
+    if (workflow.rlTraining) {
+      // Get the latest reward data (most recent reward calculation)
+      const latestReward = workflow.rlTraining.rewards && workflow.rlTraining.rewards.length > 0
+        ? workflow.rlTraining.rewards[workflow.rlTraining.rewards.length - 1]
+        : null;
+      
+      nodes.push({
+        id: 'reward-computation',
+        type: 'reward-computation',
+        data: {
+          status: latestReward ? 'complete' : (workflow.rlTraining.averageReward ? 'complete' : 'pending'),
+          // Use latest reward data if available, otherwise use average
+          combinedReward: latestReward?.combinedReward || workflow.rlTraining.averageReward || 0,
+          averageReward: workflow.rlTraining.averageReward || 0,
+          // Include breakdown from latest reward
+          breakdown: latestReward ? {
+            codeQuality: latestReward.codeQualityReward || 0,
+            testExecution: latestReward.testExecutionReward || 0,
+            reasoning: latestReward.reasoningReward || 0
+          } : (latestReward?.diagnostic?.components || {}),
+          // Also include individual rewards directly
+          codeQualityReward: latestReward?.codeQualityReward || 0,
+          testExecutionReward: latestReward?.testExecutionReward || 0,
+          reasoningReward: latestReward?.reasoningReward || 0,
+          highQuality: workflow.rlTraining.highQuality || false,
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        const prevNode = nodes[nodes.length - 2];
+        edges.push({
+          id: `edge-${prevNode.id}-reward-computation`,
+          source: prevNode.id,
+          target: 'reward-computation',
+          type: 'connector',
+          data: { sourceStatus: prevNode.data.status }
+        });
+      }
+    }
+
+    // Training Data Node (after Reward Computation)
+    if (workflow.rlTraining && workflow.rlTraining.trainingData) {
+      const latestReward = workflow.rlTraining.rewards && workflow.rlTraining.rewards.length > 0
+        ? workflow.rlTraining.rewards[workflow.rlTraining.rewards.length - 1]
+        : null;
+      
+      nodes.push({
+        id: 'training-data',
+        type: 'training-data',
+        data: {
+          status: workflow.rlTraining.trainingData ? 'complete' : 'pending',
+          trainingData: workflow.rlTraining.trainingData,
+          reward: latestReward?.combinedReward || workflow.rlTraining.averageReward || 0,
+          combinedReward: latestReward?.combinedReward || workflow.rlTraining.averageReward || 0,
+          highQuality: workflow.rlTraining.highQuality || false,
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        const prevNode = nodes[nodes.length - 2];
+        edges.push({
+          id: `edge-${prevNode.id}-training-data`,
+          source: prevNode.id,
+          target: 'training-data',
+          type: 'connector',
+          data: { sourceStatus: prevNode.data.status }
+        });
+      }
+    }
+
+    // Jira Subtask Node
+    if (workflow.jiraSubtask) {
+      nodes.push({
+        id: 'jira-subtask',
+        type: 'jira-subtask',
+        data: {
+          status: workflow.jiraSubtask.created ? 'complete' : 'pending',
+          issueKey: workflow.jiraSubtask.issueKey,
+          issueUrl: workflow.jiraSubtask.issueUrl,
+          stepNumber: stepNumber++
+        },
+        position: { x: 0, y: 0 }
+      });
+      if (nodes.length > 1) {
+        const prevNode = nodes[nodes.length - 2];
+        edges.push({
+          id: `edge-${prevNode.id}-jira-subtask`,
+          source: prevNode.id,
+          target: 'jira-subtask',
+          type: 'connector',
+          data: { sourceStatus: prevNode.data.status }
+        });
+      }
+    }
+
+    res.json({ nodes, edges, workflow: {
+      workflowId: workflow.workflowId,
+      jiraTicketKey: workflow.jiraTicketKey,
+      jiraTicketSummary: workflow.jiraTicketSummary,
+      status: workflow.status
+    }});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/workflows/:workflowId - Get workflow details
  */
 router.get('/:workflowId', async (req, res) => {
