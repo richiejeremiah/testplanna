@@ -9,6 +9,7 @@ import { CodeRabbitService } from './CodeRabbitService.js';
 import { JiraService } from './JiraService.js';
 import TestExecutionService from './TestExecutionService.js';
 import RewardCalculatorService from './RewardCalculatorService.js';
+import TrainingService from './TrainingService.js';
 import Logger from '../utils/logger.js';
 import crypto from 'crypto';
 
@@ -24,6 +25,7 @@ export class WorkflowOrchestrator {
     this.jira = new JiraService();
     this.testExecution = TestExecutionService;
     this.rewardCalculator = RewardCalculatorService;
+    this.trainingService = TrainingService;
     this.broadcaster = new WorkflowBroadcaster(io);
   }
 
@@ -87,6 +89,15 @@ export class WorkflowOrchestrator {
       // STEP 1: Fetch GitHub context
       await this.fetchGitHubContext(workflow, prUrl, logger);
 
+      // Update Jira status to "In Progress" when workflow starts
+      if (workflow.jiraTicketKey) {
+        try {
+          await this.jira.updateTicketStatus(workflow.jiraTicketKey, 'In Progress', logger);
+        } catch (error) {
+          logger.warning('Could not update Jira status to In Progress', error.message);
+        }
+      }
+
       // STEP 2: CodeRabbit Review (BEFORE test planning - informs test strategy)
       // CodeRabbit identifies security issues, architectural concerns, and code quality problems
       // These insights will be used to create better, more targeted tests
@@ -104,8 +115,14 @@ export class WorkflowOrchestrator {
       // STEP 6: Compute Reward Signals
       await this.runRewardComputationStep(workflow, logger);
 
-      // STEP 7: Push to Jira (includes CodeRabbit findings in subtask)
+      // STEP 7: Check and Trigger Training (if conditions met)
+      await this.runTrainingStep(workflow, logger);
+
+      // STEP 8: Push to Jira (includes CodeRabbit findings in subtask)
       await this.createJiraSubtaskStep(workflow, logger);
+
+      // STEP 9: Update Jira ticket status and create tickets for critical issues
+      await this.updateJiraStatusAndCreateTickets(workflow, logger);
 
       // Mark workflow complete
       workflow.status = 'completed';
@@ -763,6 +780,89 @@ export class WorkflowOrchestrator {
   }
 
   /**
+   * STEP 9: Update Jira Status and Create Tickets for Critical Issues
+   */
+  async updateJiraStatusAndCreateTickets(workflow, logger) {
+    logger.step('STEP 9: Update Jira Status & Create Tickets');
+
+    const jiraTicketKey = workflow.jiraTicketKey;
+    if (!jiraTicketKey) {
+      logger.warning('No Jira ticket key, skipping status update');
+      return;
+    }
+
+    try {
+      // Update parent ticket status to "Done" (workflow completed)
+      logger.data('Updating ticket status', `Setting ${jiraTicketKey} to Done`);
+      const statusUpdate = await this.jira.updateTicketStatus(jiraTicketKey, 'Done', logger);
+      
+      if (statusUpdate.success) {
+        logger.success(`Ticket ${jiraTicketKey} status updated to: ${statusUpdate.status}`);
+      } else {
+        logger.warning(`Could not update status: ${statusUpdate.error || 'Unknown error'}`);
+      }
+
+      // Check for critical issues and create tickets if needed
+      const codeRabbitReview = workflow.codeRabbitReview;
+      if (codeRabbitReview?.issues?.critical > 0 && codeRabbitReview.criticalIssues?.length > 0) {
+        logger.data('Critical issues found', `Creating ${codeRabbitReview.criticalIssues.length} ticket(s)`);
+        
+        const projectKey = workflow.jiraProjectKey || process.env.JIRA_PROJECT_KEY;
+        if (!projectKey) {
+          logger.warning('No project key available for creating critical issue tickets');
+          return;
+        }
+
+        // Create a ticket for each critical issue (or combine into one)
+        const criticalIssuesText = codeRabbitReview.criticalIssues
+          .map((issue, idx) => `${idx + 1}. ${issue}`)
+          .join('\n');
+
+        const criticalTicketData = {
+          summary: `Critical Code Issues Found in ${jiraTicketKey}`,
+          description: `The following critical issues were identified by CodeRabbit during automated code review:\n\n${criticalIssuesText}\n\nRelated PR: ${workflow.github?.prUrl || 'N/A'}\nWorkflow ID: ${workflow.workflowId}`,
+          issueType: 'Bug',
+          priority: 'Highest',
+          labels: ['automated', 'code-review', 'critical']
+        };
+
+        const newTicket = await this.jira.createNewTicket(projectKey, criticalTicketData, logger);
+        
+        if (newTicket.issueKey) {
+          logger.success(`Created critical issue ticket: ${newTicket.issueKey}`);
+          logger.data('Ticket URL', newTicket.issueUrl);
+        }
+      }
+
+      // Check for test failures and create ticket if needed
+      const testExecution = workflow.testExecution;
+      if (testExecution?.status === 'failed' && testExecution.failed > 0) {
+        logger.data('Test failures detected', `Creating ticket for ${testExecution.failed} failed test(s)`);
+        
+        const projectKey = workflow.jiraProjectKey || process.env.JIRA_PROJECT_KEY;
+        if (projectKey) {
+          const testFailureTicketData = {
+            summary: `Test Failures Detected in ${jiraTicketKey}`,
+            description: `Automated test execution found ${testExecution.failed} failed test(s) out of ${testExecution.total} total tests.\n\nPass Rate: ${((testExecution.passed / testExecution.total) * 100).toFixed(1)}%\nCoverage: ${testExecution.coverage}%\n\nRelated PR: ${workflow.github?.prUrl || 'N/A'}\nWorkflow ID: ${workflow.workflowId}`,
+            issueType: 'Bug',
+            priority: 'High',
+            labels: ['automated', 'test-failure']
+          };
+
+          const testFailureTicket = await this.jira.createNewTicket(projectKey, testFailureTicketData, logger);
+          
+          if (testFailureTicket.issueKey) {
+            logger.success(`Created test failure ticket: ${testFailureTicket.issueKey}`);
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Error updating Jira status or creating tickets', error.message);
+      // Don't fail the workflow if status update fails
+    }
+  }
+
+  /**
    * STEP 5: Execute Generated Tests
    */
   async runTestExecutionStep(workflow, logger) {
@@ -847,7 +947,7 @@ export class WorkflowOrchestrator {
 
     logger.success(`Tests executed: ${testResults.passed}/${testResults.total} passed`);
     logger.data('Coverage', `${testResults.coverage.toFixed(1)}%`);
-    
+
     // Log flakiness metrics if available
     if (workflow.testExecution.flakiness !== undefined) {
       logger.data('Flakiness', `${(workflow.testExecution.flakiness * 100).toFixed(1)}%`);
@@ -929,7 +1029,7 @@ export class WorkflowOrchestrator {
       testExecutionReward: testExecutionReward,
       reasoningReward: reasoningReward,
       combinedReward: combinedReward,
-      modelVersion: 'gemini-1.5-flash-v1.0',
+      modelVersion: this.trainingService.getCurrentModelVersion(),
       // IMPROVED: Diagnostic vector for auditing (helps detect gaming)
       diagnostic: {
         components: rewardResult.components || {
@@ -964,7 +1064,7 @@ export class WorkflowOrchestrator {
       combinedReward: combinedReward,
       highQuality: combinedReward > 0.75,
       diagnostic: rewardResult.diagnostic || rewardResult,
-      modelVersion: 'gemini-1.5-flash-v1.0'
+      modelVersion: this.trainingService.getCurrentModelVersion()
     });
 
     // Update average
@@ -1008,6 +1108,91 @@ export class WorkflowOrchestrator {
       'test-execution',
       'reward-computation'
     );
+  }
+
+  /**
+   * STEP 7: Check and Trigger Training (if conditions met)
+   */
+  async runTrainingStep(workflow, logger) {
+    logger.step('STEP 7: Check Training Conditions');
+
+    // Broadcast node creation
+    await this.broadcaster.broadcastNodeCreated(workflow.workflowId, {
+      type: 'training',
+      status: 'checking',
+      label: 'Model Training'
+    });
+
+    try {
+      // Check if we should trigger training
+      const shouldTrain = await this.trainingService.shouldTriggerTraining();
+      
+      if (!shouldTrain) {
+        const highQualityCount = await Workflow.countDocuments({
+          'rlTraining.enabled': true,
+          'rlTraining.highQuality': true,
+          'rlTraining.rewards.0.combinedReward': { $gte: 0.75 }
+        });
+
+        logger.data('Training Status', `Not enough examples (${highQualityCount}/${this.trainingService.minHighQualityExamples})`);
+        
+        await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'training', {
+          status: 'pending',
+          reason: `Need ${this.trainingService.minHighQualityExamples} high-quality examples. Currently have ${highQualityCount}.`,
+          currentModelVersion: this.trainingService.getCurrentModelVersion()
+        });
+
+        return;
+      }
+
+      // Trigger training
+      logger.data('Training Status', 'Starting training...');
+      await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'training', {
+        status: 'training',
+        progress: 0,
+        message: 'Collecting training examples...'
+      });
+
+      const trainingResult = await this.trainingService.startTraining();
+
+      if (trainingResult.triggered) {
+        logger.success(`Training completed! New model: ${trainingResult.modelVersion}`);
+        logger.data('Improvement', `+${trainingResult.improvement}%`);
+        logger.data('Training Examples', trainingResult.trainingExamples);
+        logger.data('Mode', trainingResult.mode);
+
+        // Broadcast training completion
+        await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'training', {
+          status: 'complete',
+          modelVersion: trainingResult.modelVersion,
+          baseReward: trainingResult.baseReward,
+          expectedReward: trainingResult.expectedReward,
+          improvement: trainingResult.improvement,
+          trainingExamples: trainingResult.trainingExamples,
+          mode: trainingResult.mode
+        });
+
+        // Create edge from Reward Computation to Training
+        await this.broadcaster.broadcastEdgeCreated(
+          workflow.workflowId,
+          'reward-computation',
+          'training'
+        );
+      } else {
+        logger.data('Training Status', trainingResult.reason || 'Not triggered');
+        await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'training', {
+          status: 'skipped',
+          reason: trainingResult.reason
+        });
+      }
+    } catch (error) {
+      logger.error('Training error', error);
+      await this.broadcaster.broadcastNodeUpdated(workflow.workflowId, 'training', {
+        status: 'failed',
+        error: error.message
+      });
+      // Don't fail the workflow if training fails
+    }
   }
 
   /**

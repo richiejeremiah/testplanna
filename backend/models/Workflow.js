@@ -130,7 +130,8 @@ const workflowSchema = new mongoose.Schema({
       testExecutionReward: { type: Number, default: 0 },
       reasoningReward: { type: Number, default: 0 },
       combinedReward: { type: Number, default: 0 },
-      modelVersion: { type: String, default: 'gemini-1.5-flash-v1.0' }
+      modelVersion: { type: String, default: 'gemini-1.5-flash-v1.0' },
+      diagnostic: mongoose.Schema.Types.Mixed
     }],
     averageReward: { type: Number, default: 0 },
     improvementTrend: {

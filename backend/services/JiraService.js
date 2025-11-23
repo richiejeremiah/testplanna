@@ -861,4 +861,200 @@ ${testData.codeRabbitStatus}
 ${testData.codeRabbitInsights}
     `.trim();
   }
+
+  /**
+   * Update Jira ticket status (transition)
+   * @param {string} issueKey - Jira issue key
+   * @param {string} statusName - Target status name (e.g., "In Progress", "Done", "To Do")
+   * @param {Object} logger - Optional logger
+   * @returns {Promise<Object>} { success: boolean, status: string, error: string }
+   */
+  async updateTicketStatus(issueKey, statusName, logger = null) {
+    if (!this.baseUrl || !this.email || !this.apiToken) {
+      if (logger) logger.warning('No Jira credentials');
+      if (this.useMock) {
+        return { success: true, status: statusName, mock: true };
+      }
+      throw new Error('Jira credentials not configured');
+    }
+
+    try {
+      // First, get available transitions for this issue
+      if (logger) logger.apiCall('Jira', 'GET', `Get transitions for ${issueKey}`);
+      const transitionsResponse = await axios.get(
+        `${this.baseUrl}/rest/api/3/issue/${issueKey}/transitions`,
+        {
+          auth: {
+            username: this.email,
+            password: this.apiToken
+          },
+          headers: {
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      // Find the transition ID that matches the target status
+      const transitions = transitionsResponse.data.transitions || [];
+      const targetTransition = transitions.find(t => 
+        t.to?.name?.toLowerCase() === statusName.toLowerCase() ||
+        t.name?.toLowerCase() === statusName.toLowerCase()
+      );
+
+      if (!targetTransition) {
+        const availableStatuses = transitions.map(t => t.to?.name || t.name).join(', ');
+        if (logger) logger.warning(`Status "${statusName}" not available. Available: ${availableStatuses}`);
+        return { 
+          success: false, 
+          error: `Status "${statusName}" not available. Available transitions: ${availableStatuses}` 
+        };
+      }
+
+      // Execute the transition
+      if (logger) logger.apiCall('Jira', 'POST', `Transition ${issueKey} to ${statusName}`);
+      await axios.post(
+        `${this.baseUrl}/rest/api/3/issue/${issueKey}/transitions`,
+        {
+          transition: {
+            id: targetTransition.id
+          }
+        },
+        {
+          auth: {
+            username: this.email,
+            password: this.apiToken
+          },
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (logger) logger.success(`Ticket ${issueKey} status updated to: ${statusName}`);
+      return { success: true, status: statusName, transitionId: targetTransition.id };
+    } catch (error) {
+      if (logger) logger.error('Failed to update ticket status', error.message);
+      if (this.useMock) {
+        return { success: true, status: statusName, mock: true };
+      }
+      return { 
+        success: false, 
+        error: error.response?.data?.errorMessages?.join(', ') || error.message 
+      };
+    }
+  }
+
+  /**
+   * Create a new Jira ticket for critical issues or bugs
+   * @param {string} projectKey - Jira project key
+   * @param {Object} issueData - Issue data (summary, description, issueType, priority, etc.)
+   * @param {Object} logger - Optional logger
+   * @returns {Promise<Object>} { issueKey, issueUrl, error }
+   */
+  async createNewTicket(projectKey, issueData, logger = null) {
+    if (!this.baseUrl || !this.email || !this.apiToken) {
+      if (logger) logger.warning('No Jira credentials');
+      if (this.useMock) {
+        const mockKey = `${projectKey}-${Math.floor(Math.random() * 1000)}`;
+        return {
+          issueKey: mockKey,
+          issueUrl: `${this.baseUrl || 'https://example.atlassian.net'}/browse/${mockKey}`,
+          mock: true
+        };
+      }
+      throw new Error('Jira credentials not configured');
+    }
+
+    try {
+      // Validate project access
+      if (logger) logger.data('Validating', `Project ${projectKey} access`);
+      const projectValidation = await this.validateProjectAccess(projectKey);
+      if (!projectValidation.valid) {
+        const errorMsg = projectValidation.error.message;
+        if (logger) logger.error('Project validation failed', errorMsg);
+        if (this.useMock) {
+          logger.warning('Using mock data due to project validation failure');
+          const mockKey = `${projectKey}-${Math.floor(Math.random() * 1000)}`;
+          return {
+            issueKey: mockKey,
+            issueUrl: `${this.baseUrl}/browse/${mockKey}`,
+            mock: true
+          };
+        }
+        throw new Error(errorMsg);
+      }
+
+      // Build issue data
+      const jiraIssueData = {
+        fields: {
+          project: {
+            key: projectKey
+          },
+          summary: issueData.summary || 'New Issue',
+          description: {
+            type: 'doc',
+            version: 1,
+            content: issueData.description ? [
+              {
+                type: 'paragraph',
+                content: [{ type: 'text', text: issueData.description }]
+              }
+            ] : []
+          },
+          issuetype: {
+            name: issueData.issueType || 'Bug'
+          }
+        }
+      };
+
+      // Add priority if provided
+      if (issueData.priority) {
+        jiraIssueData.fields.priority = { name: issueData.priority };
+      }
+
+      // Add labels if provided
+      if (issueData.labels && Array.isArray(issueData.labels)) {
+        jiraIssueData.fields.labels = issueData.labels;
+      }
+
+      // Add custom fields if provided
+      if (issueData.customFields) {
+        Object.assign(jiraIssueData.fields, issueData.customFields);
+      }
+
+      if (logger) logger.apiCall('Jira', 'POST', `Create new ticket in ${projectKey}`);
+      const response = await axios.post(
+        `${this.baseUrl}/rest/api/3/issue`,
+        jiraIssueData,
+        {
+          auth: {
+            username: this.email,
+            password: this.apiToken
+          },
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const issueKey = response.data.key;
+      const issueUrl = `${this.baseUrl}/browse/${issueKey}`;
+
+      if (logger) logger.success(`New ticket created: ${issueKey}`);
+      return { issueKey, issueUrl };
+    } catch (error) {
+      if (logger) logger.error('Failed to create new ticket', error.message);
+      if (this.useMock) {
+        const mockKey = `${projectKey}-${Math.floor(Math.random() * 1000)}`;
+        return {
+          issueKey: mockKey,
+          issueUrl: `${this.baseUrl || 'https://example.atlassian.net'}/browse/${mockKey}`,
+          mock: true
+        };
+      }
+      throw error;
+    }
+  }
 }

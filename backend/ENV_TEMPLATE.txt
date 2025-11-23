@@ -38,3 +38,12 @@ JIRA_USE_MOCK=false
 # If not set, webhook signature verification is disabled (for development)
 JIRA_WEBHOOK_SECRET=your_webhook_secret_here
 
+# HuggingFace API (for RL model training)
+HUGGINGFACE_API_TOKEN=your_huggingface_token_here
+
+# Training Configuration
+# Set to "true" to use simulation mode (for demos), "false" for real HuggingFace training
+TRAINING_USE_SIMULATION=true
+# Minimum number of high-quality examples needed to trigger training
+MIN_TRAINING_EXAMPLES=10
+

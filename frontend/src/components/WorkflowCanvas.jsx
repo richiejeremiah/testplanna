@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReactFlow, {
   Background,
   Controls,
@@ -17,8 +18,10 @@ import CodeRabbitNode from './nodes/CodeRabbitNode';
 import JiraNode from './nodes/JiraNode';
 import TestExecutionNode from './nodes/TestExecutionNode';
 import RewardComputationNode from './nodes/RewardComputationNode';
+import TrainingNode from './nodes/TrainingNode';
 import NodeDetailsPanel from './NodeDetailsPanel';
 import ProgressTimeline from './ProgressTimeline';
+import CustomConnectorEdge from './CustomConnectorEdge';
 import dagre from 'dagre';
 
 const nodeTypes = {
@@ -27,7 +30,12 @@ const nodeTypes = {
   'coderabbit-review': CodeRabbitNode,
   'test-execution': TestExecutionNode,
   'reward-computation': RewardComputationNode,
+  'training': TrainingNode,
   'jira-subtask': JiraNode
+};
+
+const edgeTypes = {
+  'connector': CustomConnectorEdge,
 };
 
 // Auto-layout function - Improved spacing and organization
@@ -61,24 +69,28 @@ const getLayoutedElements = (nodes, edges, direction = 'TB') => {
     };
   });
 
-  // Preserve all edge properties with dotted style
-  const layoutedEdges = edges.map(edge => ({
-    ...edge, // Keep all original edge properties
-    type: 'smoothstep', // Smooth curves
-    animated: true,
-    style: {
-      strokeWidth: 2.5,
-      stroke: edge.style?.stroke || '#6366f1',
-      strokeDasharray: '8,4', // Dotted line pattern
-      ...edge.style
-    },
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: edge.style?.stroke || edge.markerEnd?.color || '#6366f1',
-      width: 18,
-      height: 18
-    }
-  }));
+  // Preserve all edge properties with connector style
+  const layoutedEdges = edges.map(edge => {
+    // Get source node status for connector color
+    const sourceNode = nodes.find(n => n.id === edge.source);
+    const sourceStatus = sourceNode?.data?.status || edge.data?.sourceStatus || 'pending';
+    
+    return {
+      ...edge, // Keep all original edge properties
+      type: 'connector', // Use custom connector edge
+      animated: false, // No animation for pipeline connectors
+      data: {
+        ...edge.data,
+        sourceStatus: sourceStatus, // Pass source status for color
+        status: sourceStatus
+      },
+      style: {
+        strokeWidth: 2,
+        ...edge.style
+      },
+      markerEnd: undefined // No arrow for pipeline connectors
+    };
+  });
 
   return { nodes, edges: layoutedEdges };
 };
@@ -168,6 +180,15 @@ function KeyboardControls({ onNodeFocus }) {
 }
 
 export default function WorkflowCanvas({ workflowId, onBack }) {
+  const navigate = useNavigate();
+  
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      navigate('/board');
+    }
+  };
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -204,54 +225,79 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
 
     // Listen for node updates
     newSocket.on('node-updated', ({ id, data }) => {
-      setNodes((nds) =>
-        nds.map((node) =>
+      setNodes((nds) => {
+        const updatedNodes = nds.map((node) =>
           node.id === id
             ? { ...node, data: { ...node.data, ...data } }
             : node
-        )
-      );
+        );
+        
+        // Update edges connected to this node to reflect status changes
+        setEdges((eds) => {
+          return eds.map((edge) => {
+            if (edge.source === id) {
+              // Update edge color based on source node status
+              return {
+                ...edge,
+                data: {
+                  ...edge.data,
+                  sourceStatus: data.status || edge.data?.sourceStatus,
+                  status: data.status || edge.data?.status
+                }
+              };
+            }
+            return edge;
+          });
+        });
+        
+        return updatedNodes;
+      });
     });
 
     // Listen for edge creation
     newSocket.on('edge-created', (edge) => {
-      // Ensure edge has proper styling with dotted pattern and arrow marker
-      const styledEdge = {
-        ...edge,
-        id: edge.id || `edge-${edge.source}-${edge.target}`,
-        type: 'smoothstep', // Smooth curves
-        animated: true,
-        style: {
-          strokeWidth: 2.5,
-          stroke: edge.style?.stroke || '#6366f1',
-          strokeDasharray: '8,4', // Dotted line pattern
-          ...edge.style
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: edge.style?.stroke || edge.markerEnd?.color || '#6366f1',
-          width: 18,
-          height: 18
-        }
-      };
+      // Get source node status for connector color
+      setNodes((nds) => {
+        const sourceNode = nds.find(n => n.id === edge.source);
+        const sourceStatus = sourceNode?.data?.status || 'pending';
+        
+        const styledEdge = {
+          ...edge,
+          id: edge.id || `edge-${edge.source}-${edge.target}`,
+          type: 'connector', // Use custom connector edge
+          animated: false,
+          data: {
+            ...edge.data,
+            sourceStatus: sourceStatus,
+            status: sourceStatus
+          },
+          style: {
+            strokeWidth: 2,
+            ...edge.style
+          },
+          markerEnd: undefined // No arrow for pipeline connectors
+        };
 
-      setEdges((eds) => {
-        const exists = eds.find(e => e.id === styledEdge.id);
-        if (exists) return eds;
-        return addEdge(styledEdge, eds);
-      });
-
-      // Re-layout after adding edge (use setTimeout to batch updates)
-      setTimeout(() => {
-        setNodes((nds) => {
-          setEdges((eds) => {
-            const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds);
-            setEdges(layoutedEdges);
-            return layoutedNodes;
-          });
-          return nds;
+        setEdges((eds) => {
+          const exists = eds.find(e => e.id === styledEdge.id);
+          if (exists) return eds;
+          return addEdge(styledEdge, eds);
         });
-      }, 100);
+
+        // Re-layout after adding edge (use setTimeout to batch updates)
+        setTimeout(() => {
+          setNodes((nds) => {
+            setEdges((eds) => {
+              const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(nds, eds);
+              setEdges(layoutedEdges);
+              return layoutedNodes;
+            });
+            return nds;
+          });
+        }, 100);
+        
+        return nds;
+      });
     });
 
     // Listen for workflow status
@@ -297,10 +343,10 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
         <div className="flex items-center justify-between mb-4">
           <div>
             <button
-              onClick={onBack}
+              onClick={handleBack}
               className="text-blue-600 hover:text-blue-800 font-semibold mb-2"
             >
-              ← Back to Dashboard
+              ← Back to Board
             </button>
             <h2 className="text-xl font-bold text-gray-900">
               Workflow: {workflowId ? `${workflowId.substring(0, 8)}...` : 'Loading...'}
@@ -317,6 +363,7 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
@@ -330,18 +377,10 @@ export default function WorkflowCanvas({ workflowId, onBack }) {
             preventScrolling={false}
             selectionOnDrag={false} // Disable selection drag to allow panning
             defaultEdgeOptions={{
-              type: 'smoothstep',
-              animated: true,
+              type: 'connector',
+              animated: false,
               style: { 
-                strokeWidth: 2.5, 
-                stroke: '#6366f1',
-                strokeDasharray: '8,4' // Dotted pattern
-              },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color: '#6366f1',
-                width: 18,
-                height: 18
+                strokeWidth: 2
               }
             }}
           >

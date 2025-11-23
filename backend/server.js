@@ -15,16 +15,34 @@ const httpServer = createServer(app);
 // Socket.io setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    methods: ["GET", "POST"]
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:5173",
+      "http://localhost:5173",
+      "http://localhost:5175",
+      "http://localhost:5174",
+      "http://localhost:5176"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
 // Store io instance in app for use in routes
 app.set('io', io);
 
-// Middleware
-app.use(cors());
+// Middleware - CORS configuration
+app.use(cors({
+  origin: [
+    process.env.FRONTEND_URL || "http://localhost:5173",
+    "http://localhost:5173",
+    "http://localhost:5175",
+    "http://localhost:5174",
+    "http://localhost:5176"
+  ],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
 
 // MongoDB connection

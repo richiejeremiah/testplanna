@@ -1,10 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -12,8 +14,27 @@ body {
 }
 
 #root {
-  width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* Custom decorative shapes for landing page */
+.blob {
+  position: absolute;
+  filter: blur(40px);
+  z-index: -1;
+  opacity: 0.4;
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+  100% { transform: translateY(0px); }
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
 }
 
 /* React Flow Edge Styling - Dotted Arrows */

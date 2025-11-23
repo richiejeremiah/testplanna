@@ -94,13 +94,46 @@ export default function ProgressTimeline({ nodes = [], onStepClick }) {
           const isActive = currentStep === step.num;
           const isPending = currentStep < step.num;
 
+          // Determine connector color based on current step's status
+          // Get status from stepNode if available, otherwise use completion state
+          const stepStatus = stepNode?.data?.status || (isComplete ? 'complete' : 'pending');
+          
+          // Determine connector color based on status
+          let connectorColor = '#CBD5E0'; // Default gray
+          if (stepStatus === 'complete') {
+            connectorColor = '#10B981'; // Green
+          } else if (['ready', 'pending'].includes(stepStatus)) {
+            connectorColor = '#CBD5E0'; // Gray
+          } else if (['analyzing', 'generating', 'reviewing', 'creating', 'fetching', 'executing', 'computing'].includes(stepStatus)) {
+            connectorColor = '#3B82F6'; // Blue for active states
+          }
+
+          // Determine if connector should be solid or dashed
+          const isConnectorComplete = stepStatus === 'complete';
+          const connectorStyle = isConnectorComplete ? 'solid' : 'dashed';
+
           return (
-            <div key={step.num} className="flex items-center flex-1">
+            <div key={step.num} className="flex items-center flex-1 relative">
               {/* Step Circle - Clickable */}
               <div 
                 className={`flex flex-col items-center flex-1 ${isPending ? 'opacity-40' : 'opacity-100'} relative group`}
                 title={step.description}
               >
+                {/* Left connection dot */}
+                {i > 0 && (
+                  <div 
+                    className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1/2 z-10"
+                    style={{ 
+                      width: '8px', 
+                      height: '8px', 
+                      borderRadius: '50%',
+                      backgroundColor: connectorColor,
+                      border: '2px solid white',
+                      boxShadow: '0 0 0 1px ' + connectorColor
+                    }}
+                  />
+                )}
+
                 <button
                   onClick={() => {
                     if (onStepClick && stepNode) {
@@ -109,7 +142,7 @@ export default function ProgressTimeline({ nodes = [], onStepClick }) {
                   }}
                   disabled={!stepNode}
                   className={`
-                    w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold border-4 transition-all
+                    w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold border-4 transition-all relative z-20
                     ${isComplete
                       ? 'bg-green-500 border-green-600 text-white hover:bg-green-600 cursor-pointer'
                       : isActive
@@ -142,24 +175,40 @@ export default function ProgressTimeline({ nodes = [], onStepClick }) {
                     <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
                   </div>
                 )}
+
+                {/* Right connection dot */}
+                {i < steps.length - 1 && (
+                  <div 
+                    className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/2 z-10"
+                    style={{ 
+                      width: '8px', 
+                      height: '8px', 
+                      borderRadius: '50%',
+                      backgroundColor: connectorColor,
+                      border: '2px solid white',
+                      boxShadow: '0 0 0 1px ' + connectorColor
+                    }}
+                  />
+                )}
               </div>
               
-              {/* Connecting Line with Arrow */}
+              {/* Connecting Line - Horizontal line between steps */}
               {i < steps.length - 1 && (
-                <div className="flex items-center flex-1 mx-2">
-                <div
-                  className={`
-                      h-1 flex-1 transition-all relative
-                    ${currentStep > step.num ? 'bg-green-500' : 'bg-gray-300'}
-                  `}
-                  >
-                    {/* Arrow head */}
-                    {currentStep > step.num && (
-                      <div className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/2">
-                        <div className="w-0 h-0 border-l-4 border-l-green-500 border-t-2 border-t-transparent border-b-2 border-b-transparent"></div>
-                      </div>
-                    )}
-                  </div>
+                <div className="flex items-center flex-1 mx-2 relative" style={{ height: '2px' }}>
+                  <div
+                    className="flex-1 transition-all duration-300"
+                    style={{
+                      height: '2px',
+                      backgroundColor: connectorStyle === 'solid' ? connectorColor : 'transparent',
+                      borderTop: connectorStyle === 'dashed' ? `2px dashed ${connectorColor}` : 'none',
+                      borderBottom: 'none',
+                      backgroundImage: connectorStyle === 'dashed' 
+                        ? `repeating-linear-gradient(to right, ${connectorColor} 0px, ${connectorColor} 6px, transparent 6px, transparent 10px)`
+                        : 'none',
+                      backgroundSize: connectorStyle === 'dashed' ? '10px 2px' : 'auto',
+                      backgroundRepeat: connectorStyle === 'dashed' ? 'repeat-x' : 'no-repeat'
+                    }}
+                  />
                 </div>
               )}
             </div>

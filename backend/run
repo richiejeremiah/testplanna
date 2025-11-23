@@ -1,0 +1,16 @@
+#!/bin/bash
+# Startup script for backend server
+# This script sets up nvm and starts the Node.js server
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+# Use default Node.js version
+nvm use default
+
+# Change to backend directory
+cd "$(dirname "$0")"
+
+# Start the server
+echo "🚀 Starting backend server..."
+npm start

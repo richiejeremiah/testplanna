@@ -31,12 +31,57 @@ function verifyWebhookSignature(payload, signature, secret) {
 
 /**
  * GET /api/workflows - List all workflows
+ * Optionally sync with Jira if sync=true query param is provided
  */
 router.get('/', async (req, res) => {
   try {
-    const workflows = await Workflow.find()
+    const { sync } = req.query;
+    let workflows = await Workflow.find()
       .sort({ createdAt: -1 })
       .limit(50);
+    
+    // If sync=true, fetch latest Jira status for workflows with jiraTicketKey
+    if (sync === 'true') {
+      const { JiraService } = await import('../services/JiraService.js');
+      const jiraService = new JiraService();
+      
+      // Sync Jira status for workflows that have a ticket key
+      const syncPromises = workflows
+        .filter(w => w.jiraTicketKey)
+        .map(async (workflow) => {
+          try {
+            const { issue, error } = await jiraService.getIssue(workflow.jiraTicketKey);
+            if (error) {
+              console.warn(`Failed to sync ${workflow.jiraTicketKey}:`, error.message);
+              return;
+            }
+            
+            if (issue && issue.fields) {
+              // Update workflow with latest Jira data
+              workflow.jiraTicketSummary = issue.fields.summary || workflow.jiraTicketSummary;
+              const jiraStatus = issue.fields.status?.name || '';
+              
+              // Map Jira status to workflow status if needed
+              if (jiraStatus === 'Done' && workflow.status !== 'completed') {
+                workflow.status = 'completed';
+              } else if (jiraStatus === 'In Progress' && workflow.status === 'pending') {
+                workflow.status = 'running';
+              }
+              
+              await workflow.save();
+            }
+          } catch (error) {
+            console.error(`Failed to sync ${workflow.jiraTicketKey}:`, error.message);
+          }
+        });
+      
+      await Promise.allSettled(syncPromises);
+      
+      // Re-fetch workflows after sync
+      workflows = await Workflow.find()
+        .sort({ createdAt: -1 })
+        .limit(50);
+    }
     
     res.json(workflows);
   } catch (error) {
@@ -158,6 +203,121 @@ router.post('/webhooks/jira', async (req, res) => {
 });
 
 /**
+ * POST /api/workflows/demo - Trigger demo workflow with real GitHub PR and Jira
+ * Accepts a PR URL (or uses a default from your repos) and creates real Jira ticket
+ */
+router.post('/demo', async (req, res) => {
+  try {
+    const { JiraService } = await import('../services/JiraService.js');
+    const jira = new JiraService();
+
+    // Use provided PR URL or default to a real PR from your repo
+    let prUrl = req.body.prUrl?.trim();
+    
+    if (!prUrl) {
+      // Default to repository URL (works even if no PRs exist)
+      // Falls back to repository mode if PR doesn't exist
+      prUrl = 'https://github.com/jeremiahrichie/ai-ugc-engine';
+      console.log(`📋 Using default repository URL: ${prUrl}`);
+      console.log(`💡 Tip: Provide a PR URL or repository URL in the request body`);
+    } else {
+      console.log(`📋 Using provided URL: ${prUrl}`);
+    }
+
+    // Extract PR info from URL
+    const prMatch = prUrl.match(/github\.com\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/i);
+    const repoOwner = prMatch ? prMatch[1] : 'jeremiahrichie';
+    const repoName = prMatch ? prMatch[2] : 'ai-ugc-engine';
+    const prNumber = prMatch ? parseInt(prMatch[3]) : 1;
+
+    // Create a real Jira ticket for the demo
+    let jiraTicketKey = req.body.jiraTicketKey?.trim();
+    let projectKey = req.body.projectKey || req.body.selectedProjectKey || process.env.JIRA_PROJECT_KEY;
+
+    if (!jiraTicketKey) {
+      try {
+        // Get project key if not provided
+        if (!projectKey) {
+          const projects = await jira.listProjects();
+          if (projects.projects && projects.projects.length > 0) {
+            projectKey = projects.projects[0].key;
+            console.log(`📋 Using project: ${projectKey}`);
+          } else {
+            projectKey = process.env.JIRA_PROJECT_KEY || 'TEST';
+            console.log(`📋 Using default project: ${projectKey}`);
+          }
+        }
+
+        const ticketSummary = `Demo: Test Generation for ${repoName} PR #${prNumber}`;
+        const ticketDescription = `Automated test generation workflow triggered for demonstration.\n\n**GitHub PR:** ${prUrl}\n**Repository:** ${repoOwner}/${repoName}\n**PR Number:** #${prNumber}\n\nThis ticket was auto-created for the demo workflow.`;
+
+        console.log(`📋 Creating real Jira ticket in project: ${projectKey}`);
+        const createResult = await jira.createIssue(projectKey, ticketSummary, ticketDescription, 'Task');
+        
+        if (createResult.issue) {
+          jiraTicketKey = createResult.issue.key;
+          console.log(`✅ Created real Jira ticket: ${jiraTicketKey}`);
+        } else if (createResult.error) {
+          console.warn('Could not create Jira ticket:', createResult.error.message);
+          // Continue - ticket will be auto-created in workflow
+        }
+      } catch (error) {
+        console.warn('Error creating Jira ticket:', error.message);
+        // Continue - ticket will be auto-created in workflow
+      }
+    } else {
+      console.log(`📋 Using existing Jira ticket: ${jiraTicketKey}`);
+    }
+
+    const jiraTicket = {
+      jiraTicketKey: jiraTicketKey || null,
+      projectKey: projectKey,
+      selectedProjectKey: projectKey,
+      assignee: req.body.assignee || 'demo.user',
+      prUrl: prUrl,
+      prNumber: prNumber,
+      branch: req.body.branch || 'main',
+      summary: req.body.summary || `Demo: Test Generation for ${repoName} PR #${prNumber}`
+    };
+    
+    console.log('🚀 Triggering DEMO workflow with REAL data:', {
+      jiraTicketKey: jiraTicket.jiraTicketKey,
+      prUrl: jiraTicket.prUrl,
+      summary: jiraTicket.summary,
+      projectKey: jiraTicket.projectKey,
+      repo: `${repoOwner}/${repoName}`
+    });
+
+    // Import orchestrator here to avoid circular dependency
+    const { WorkflowOrchestrator } = await import('../services/WorkflowOrchestrator.js');
+    
+    // Get io instance from app (we'll pass it via req.app)
+    const orchestrator = new WorkflowOrchestrator(req.app.get('io'));
+    
+    // Generate workflowId first (before starting workflow)
+    const workflowId = uuidv4();
+    
+    // Start workflow (non-blocking)
+    orchestrator.startWorkflow({ ...jiraTicket, workflowId }).catch(err => {
+      console.error('Workflow error:', err);
+    });
+
+    res.json({ 
+      message: 'Demo workflow started with real GitHub PR and Jira',
+      workflowId: workflowId,
+      jiraTicketKey: jiraTicket.jiraTicketKey || 'Will be auto-created',
+      prUrl: prUrl,
+      projectKey: projectKey,
+      repo: `${repoOwner}/${repoName}`,
+      note: 'Using real GitHub PR and Jira integration - all data is live!'
+    });
+  } catch (error) {
+    console.error('Demo workflow error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/workflows/trigger - Manually trigger a workflow
  */
 router.post('/trigger', async (req, res) => {
@@ -205,6 +365,48 @@ router.post('/trigger', async (req, res) => {
       workflowId: workflowId,
       jiraTicketKey: jiraTicket.jiraTicketKey || 'Will be auto-created'
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/workflows/training/status - Get training status and model versions
+ */
+router.get('/training/status', async (req, res) => {
+  try {
+    const { TrainingService } = await import('../services/TrainingService.js');
+    const trainingService = TrainingService;
+    
+    const shouldTrain = await trainingService.shouldTriggerTraining();
+    const currentVersion = trainingService.getCurrentModelVersion();
+    const allVersions = trainingService.getAllModelVersions();
+    const versionComparison = await trainingService.compareModelVersions();
+    
+    res.json({
+      shouldTriggerTraining: shouldTrain,
+      currentModelVersion: currentVersion,
+      modelVersions: allVersions,
+      versionComparison: versionComparison,
+      useSimulation: trainingService.useSimulation,
+      minExamples: trainingService.minHighQualityExamples
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/workflows/training/start - Manually trigger training
+ */
+router.post('/training/start', async (req, res) => {
+  try {
+    const { TrainingService } = await import('../services/TrainingService.js');
+    const trainingService = TrainingService;
+    
+    const result = await trainingService.startTraining();
+    
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
